@@ -1,0 +1,24 @@
+{
+  "name": "rag-api",
+  "version": "1.0.0",
+  "description": "RAG API with DeepSeek and Elasticsearch",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+  
+    "@elastic/elasticsearch": "^8.9.0",
+    "@langchain/community": "^0.3.57",
+    "@xenova/transformers": "^2.17.2",
+    "axios": "^1.5.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "langchain": "^0.3.35"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
