@@ -1,10 +1,11 @@
 const express = require('express');
-const llmService = require('../services/llmservice');
+const llmService = require('../services/llmService');
+const groqService = require('../services/groqService');
 const elasticsearchService = require('../services/elasticsearch');
 
 const router = express.Router();
 
-// Simple RAG endpoint - just like your Python version
+// Existing RAG query endpoint
 router.post('/query', async (req, res) => {
   try {
     const { question, sessionId = 'default' } = req.body;
@@ -15,19 +16,20 @@ router.post('/query', async (req, res) => {
 
     console.log(`💬 Processing: "${question}"`);
 
-    // Check for simple responses first (bypasses everything for common queries)
-    const simpleResponse = llmService.getSimpleResponse?.(question);
+    // Check for simple responses first
+    const simpleResponse = llmService.getSimpleResponse(question);
     if (simpleResponse) {
       return res.json({
         question,
         answer: simpleResponse,
         sources: [],
         totalSources: 0,
-        simpleResponse: true
+        simpleResponse: true,
+        provider: 'simple'
       });
     }
 
-    // Single RAG chain call - just like Python's rag_chain.invoke()
+    // Use RAG chain
     const result = await llmService.ragChain(question, sessionId);
 
     res.json({
@@ -39,131 +41,144 @@ router.post('/query', async (req, res) => {
         content: doc.content?.substring(0, 100) + '...'
       })),
       totalSources: result.sources.length,
-      fallback: result.fallback || false
+      provider: result.provider,
+      contextUsed: result.contextUsed
     });
 
   } catch (error) {
     console.error('RAG query error:', error);
-    
-    // FALLBACK: Show Elasticsearch data instead of generic error
-    try {
-      const relevantDocs = await elasticsearchService.retrieveRelevantDocuments(question, 'documents', 3);
-      
-      if (relevantDocs.length > 0) {
-        // Format the Elasticsearch results into a helpful response
-        const answer = formatElasticsearchFallback(relevantDocs, question);
-        
-        return res.json({
-          question,
-          answer: answer,
-          sources: relevantDocs.map(doc => ({
-            title: doc.title,
-            score: doc.score ? doc.score.toFixed(4) : 'N/A',
-            content: doc.content?.substring(0, 100) + '...'
-          })),
-          totalSources: relevantDocs.length,
-          fallback: true,
-          error: true
-        });
-      } else {
-        // No documents found
-        return res.json({
-          question,
-          answer: "I searched my knowledge base but couldn't find specific information about that. Could you try rephrasing your question or ask about a different topic?",
-          sources: [],
-          totalSources: 0,
-          fallback: true,
-          error: true
-        });
-      }
-    } catch (fallbackError) {
-      // Even the fallback search failed
-      console.error('Fallback also failed:', fallbackError);
-      return res.json({
-        question,
-        answer: "I'm here to help! I can search for information in my knowledge base. What would you like to know?",
-        sources: [],
-        totalSources: 0,
-        fallback: true,
-        error: true
-      });
-    }
+    res.json({
+      question: req.body.question,
+      answer: "I'm here to help! What would you like to know?",
+      sources: [],
+      totalSources: 0,
+      error: true,
+      provider: 'error'
+    });
   }
 });
 
-// Helper function to format Elasticsearch results when LLM fails
-function formatElasticsearchFallback(documents, question) {
-  if (documents.length === 0) {
-    return "I couldn't find any relevant information in my knowledge base.";
-  }
-  
-  const topDoc = documents[0];
-  const otherDocs = documents.slice(1);
-  
-  let response = `I found ${documents.length} relevant document(s) about "${question}". Here's the most relevant information:\n\n`;
-  response += `**${topDoc.title}**\n`;
-  response += `${topDoc.content.substring(0, 400)}${topDoc.content.length > 400 ? '...' : ''}\n`;
-  
-  if (otherDocs.length > 0) {
-    response += `\nOther relevant documents:\n`;
-    otherDocs.forEach((doc, index) => {
-      response += `• ${doc.title} (score: ${doc.score ? doc.score.toFixed(4) : 'N/A'})\n`;
-    });
-  }
-  
-  response += `\nThis information was retrieved directly from the knowledge base.`;
-  
-  return response;
-}
-
-// Test endpoint
-router.post('/test-rag', async (req, res) => {
+// NEW: Switch LLM provider
+router.post('/switch-provider', async (req, res) => {
   try {
-    const { question = 'What is Acne?' } = req.body;
-    const result = await llmService.ragChain(question);
+    const { provider } = req.body; // 'groq', 'deepseek', or 'fallback'
+    
+    if (!['groq', 'deepseek', 'fallback'].includes(provider)) {
+      return res.status(400).json({ error: 'Provider must be groq, deepseek, or fallback' });
+    }
+
+    const newProvider = await llmService.switchProvider(provider);
     
     res.json({
-      question,
-      answer: result.answer,
-      sourcesCount: result.sources.length,
-      fallback: result.fallback || false
+      message: `Switched to ${newProvider} provider`,
+      provider: newProvider,
+      timestamp: new Date().toISOString()
     });
   } catch (error) {
-    // Show Elasticsearch data even in test endpoint
-    try {
-      const relevantDocs = await elasticsearchService.retrieveRelevantDocuments(question, 'documents', 3);
-      const answer = formatElasticsearchFallback(relevantDocs, question);
-      
-      res.json({
-        question,
-        answer: answer,
-        sourcesCount: relevantDocs.length,
-        fallback: true,
-        error: error.message
-      });
-    } catch (fallbackError) {
-      res.status(500).json({ 
-        error: error.message,
-        fallbackError: fallbackError.message 
-      });
-    }
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Health check endpoint
-router.get('/health', async (req, res) => {
+// NEW: Test Groq directly
+router.post('/test-groq', async (req, res) => {
   try {
-    const esHealth = await elasticsearchService.checkConnection();
+    const { 
+      prompt = 'Hello, who are you?',
+      systemMessage = null 
+    } = req.body;
+
+    const response = await groqService.generateCompletion(prompt, systemMessage);
+    
     res.json({
-      elasticsearch: esHealth ? 'connected' : 'disconnected',
-      status: 'ok'
+      provider: 'groq',
+      model: groqService.model,
+      response,
+      prompt
     });
   } catch (error) {
     res.status(500).json({
-      elasticsearch: 'error',
-      status: 'error',
+      error: 'Groq test failed',
       message: error.message
     });
+  }
+});
+
+// NEW: Get available Groq models
+router.get('/groq-models', async (req, res) => {
+  try {
+    const models = await groqService.getAvailableModels();
+    
+    res.json({
+      provider: 'groq',
+      currentModel: groqService.model,
+      availableModels: models
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to fetch Groq models',
+      message: error.message
+    });
+  }
+});
+
+// NEW: Health check for all services
+router.get('/health', async (req, res) => {
+  try {
+    const health = await llmService.checkHealth();
+    
+    res.json({
+      status: 'OK',
+      services: health,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'ERROR',
+      message: error.message
+    });
+  }
+});
+
+// NEW: Compare providers
+router.post('/compare-providers', async (req, res) => {
+  try {
+    const { question = 'What is machine learning?' } = req.body;
+
+    const relevantDocs = await elasticsearchService.retrieveRelevantDocuments(question, 'salt', 3);
+    const context = elasticsearchService.formatDocumentsForContext(relevantDocs);
+    
+    const prompt = llmService.getSystemPrompt()
+      .replace('{context}', context)
+      .replace('{input}', question);
+
+    const results = {};
+
+    // Test Groq
+    try {
+      results.groq = await groqService.generateCompletion(prompt);
+    } catch (error) {
+      results.groq = `Error: ${error.message}`;
+    }
+
+    // Test DeepSeek
+    try {
+      results.deepseek = await deepseekService.generateCompletion(prompt);
+    } catch (error) {
+      results.deepseek = `Error: ${error.message}`;
+    }
+
+    // Fallback
+    results.fallback = llmService.formatSimpleResponse(relevantDocs, question);
+
+    res.json({
+      question,
+      context: context.substring(0, 200) + '...',
+      results,
+      sources: relevantDocs.length
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 

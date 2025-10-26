@@ -1,93 +1,96 @@
+const groqService = require('./groqService');
 const deepseekService = require('./deepseek');
 const elasticsearchService = require('./elasticsearch');
 
 class LLMService {
-  getSystemPrompt() {
-    return `You are a medical expert with advanced knowledge in clinical reasoning, diagnostics, and treatment planning.
-
-You are an assistant for question-answering tasks. 
-Use the following pieces of retrieved context to answer the question. If you don't get the context along with the question, provide us with the most thoughtful answer you can. 
-Write a response that appropriately completes the request.
-
-Before answering, think carefully about the question and create a step-by-step chain of thoughts to ensure a logical and accurate response.
-
-Please answer the following medical question with reference to the context if it exists.
-
-### Instruction:
-
-{context}
-
-{input}`;
+  constructor() {
+    this.useGroq = process.env.USE_GROQ === 'true';
+    this.useDeepSeek = 'false';
+    this.currentProvider =  'groq' 
   }
 
-  async ragChain(input) {
+  getSystemPrompt() {
+    return `You are a helpful assistant with medical knowledge. Use the following context to answer the question.
+
+CONTEXT:
+{context}
+
+QUESTION: {input}
+
+Please provide an accurate answer based on the context. If the context doesn't contain relevant information, please say so.`;
+  }
+
+  async ragChain(input, sessionId = 'default') {
     try {
       console.log('🔄 Starting RAG chain...');
       
-      // 1. Retrieve documents from Elasticsearch
-      const relevantDocs = await elasticsearchService.retrieveRelevantDocuments(input, 'documents', 5);
+      // 1. Retrieve documents
+      const relevantDocs = await elasticsearchService.retrieveRelevantDocuments(input, 'salt', 5);
       
-      // 2. Format context
-      const context = relevantDocs.map(doc => 
-        `Title: ${doc.title}\nContent: ${doc.content}`
-      ).join('\n\n');
+      // 2. If no documents found, provide a friendly response
+      if (relevantDocs.length === 0) {
+        return {
+          answer: "I searched my knowledge base but couldn't find specific information about that. Could you try rephrasing your question or ask about a different topic?",
+          sources: [],
+          contextUsed: false,
+          provider: 'none'
+        };
+      }
       
-      // 3. Build prompt
+      // 3. Format context
+      const context = elasticsearchService.formatDocumentsForContext(relevantDocs);
+      
+      // 4. Build prompt
       const prompt = this.getSystemPrompt()
         .replace('{context}', context)
         .replace('{input}', input);
       
-      console.log('🤖 Calling DeepSeek...');
-      
-      // 4. Generate answer
-      const answer = await deepseekService.generateCompletion(prompt);
+      // 5. Generate answer using selected provider
+      let answer;
+      let providerUsed = this.currentProvider;
+
+      if (this.useGroq) {
+        try {
+          console.log('🚀 Using Groq for response...');
+          answer = await groqService.generateRAGResponse(input, context);
+        } catch (groqError) {
+          console.error('❌ Groq failed, falling back:', groqError.message);
+          providerUsed = 'fallback';
+          answer = this.formatSimpleResponse(relevantDocs, input);
+        }
+      } else if (this.useDeepSeek) {
+        try {
+          console.log('🤖 Using DeepSeek for response...');
+          answer = await deepseekService.generateCompletion(prompt);
+        } catch (deepseekError) {
+          console.error('❌ DeepSeek failed, falling back:', deepseekError.message);
+          providerUsed = 'fallback';
+          answer = this.formatSimpleResponse(relevantDocs, input);
+        }
+      } else {
+        answer = this.formatSimpleResponse(relevantDocs, input);
+      }
       
       return {
         answer: answer.trim(),
         sources: relevantDocs,
-        contextUsed: context.length > 0
+        contextUsed: true,
+        provider: providerUsed
       };
       
     } catch (error) {
       console.error('❌ RAG chain error:', error);
       
-      // FALLBACK: Show the Elasticsearch data we obtained
-      try {
-        const relevantDocs = await elasticsearchService.retrieveRelevantDocuments(input, 'documents', 3);
-        
-        if (relevantDocs.length > 0) {
-          // Format the Elasticsearch results into a helpful response
-          const topDoc = relevantDocs[0];
-          const answer = this.formatElasticsearchResults(relevantDocs, input);
-          
-          return {
-            answer: answer,
-            sources: relevantDocs,
-            contextUsed: true,
-            fallback: true
-          };
-        } else {
-          // No documents found in Elasticsearch
-          return {
-            answer: "I searched my knowledge base but couldn't find specific information about that. Could you try rephrasing your question or ask about a different topic?",
-            sources: [],
-            contextUsed: false,
-            fallback: true
-          };
-        }
-      } catch (fallbackError) {
-        // Even the fallback search failed
-        return {
-          answer: "I'm here to help! I can search for information in my knowledge base. What would you like to know?",
-          sources: [],
-          contextUsed: false,
-          fallback: true
-        };
-      }
+      return {
+        answer: "I'm here to help! I can search for information in my knowledge base. What would you like to know?",
+        sources: [],
+        contextUsed: false,
+        provider: 'error'
+      };
     }
   }
 
-  formatElasticsearchResults(documents, question) {
+  formatSimpleResponse(documents, question) {
     if (documents.length === 0) {
       return "I couldn't find any relevant information in my knowledge base.";
     }
@@ -97,7 +100,7 @@ Please answer the following medical question with reference to the context if it
     
     let response = `I found ${documents.length} relevant document(s) about "${question}". Here's the most relevant information:\n\n`;
     response += `**${topDoc.title}**\n`;
-    response += `${topDoc.content.substring(0, 400)}${topDoc.content.length > 400 ? '...' : ''}\n`;
+    response += `${topDoc.body_v2.substring(0, 100000)}${topDoc.body_v2.length > 400 ? '...' : ''}\n`;
     
     if (otherDocs.length > 0) {
       response += `\nOther relevant documents:\n`;
@@ -106,22 +109,47 @@ Please answer the following medical question with reference to the context if it
       });
     }
     
-    response += `\nThis information was retrieved from my knowledge base using semantic search.`;
-    
     return response;
   }
 
-  // Simple responses for common queries (bypasses LLM when needed)
+  // Switch between providers dynamically
+  async switchProvider(provider) {
+    if (provider === 'groq') {
+      this.useGroq = true;
+      this.useDeepSeek = false;
+      this.currentProvider = 'groq';
+    } else if (provider === 'deepseek') {
+      this.useGroq = true;
+      this.useDeepSeek = false;
+      this.currentProvider = 'deepseek';
+    } else {
+      this.useGroq = true;
+      this.useDeepSeek = false;
+      this.currentProvider = 'fallback';
+    }
+    
+    console.log(`🔄 Switched to provider: ${this.currentProvider}`);
+    return this.currentProvider;
+  }
+
+  async checkHealth() {
+    const health = {
+      currentProvider: this.currentProvider,
+      groq: await groqService.checkHealth(),
+      deepseek: await deepseekService.checkHealth().catch(() => false),
+      elasticsearch: await elasticsearchService.checkConnection()
+    };
+
+    return health;
+  }
+
   getSimpleResponse(input) {
     const lowerInput = input.toLowerCase().trim();
     const simpleResponses = {
       'hi': 'Hello! I can help you search for information in my knowledge base. What would you like to know?',
       'hello': 'Hi there! I\'m ready to help you find information. What topic are you interested in?',
-      'introduce yourself': 'I\'m a search assistant that can find and present information from my knowledge base. Ask me anything!',
-      'who are you': 'I\'m an AI assistant that searches through documents to find relevant information for you.',
-      'what can you do': 'I can search my knowledge base for information and present it to you in a helpful way. Try asking me about any topic!',
-      'thanks': 'You\'re welcome! Let me know if you need more information.',
-      'thank you': 'Happy to help! Feel free to ask if you have more questions.'
+      'hey': 'Hey! How can I assist you today?',
+      // ... other simple responses
     };
     
     return simpleResponses[lowerInput];

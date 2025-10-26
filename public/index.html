@@ -1,37 +1,233 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>RAG Chat Interface</title>
+    <title>RAG Chat Interface with Groq</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        .chat-container { max-width: 800px; margin: 0 auto; }
-        .messages { border: 1px solid #ccc; padding: 20px; height: 400px; overflow-y: auto; margin-bottom: 20px; }
-        .message { margin-bottom: 15px; padding: 10px; border-radius: 8px; }
-        .user { background: #e3f2fd; margin-left: 50px; }
-        .assistant { background: #f5f5f5; margin-right: 50px; }
-        .input-area { display: flex; gap: 10px; }
-        input { flex: 1; padding: 10px; font-size: 16px; }
-        button { padding: 10px 20px; background: #007bff; color: white; border: none; cursor: pointer; }
-        .sources { font-size: 12px; color: #666; margin-top: 5px; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            margin: 0; 
+            padding: 20px; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .chat-container { 
+            max-width: 1000px; 
+            margin: 0 auto; 
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+        .header { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .header h1 { 
+            margin: 0; 
+            font-size: 24px;
+        }
+        .header .subtitle {
+            margin: 5px 0 0 0;
+            opacity: 0.9;
+            font-size: 14px;
+        }
+        .messages { 
+            height: 500px; 
+            overflow-y: auto; 
+            padding: 20px;
+            background: #f8f9fa;
+        }
+        .message { 
+            margin-bottom: 20px; 
+            padding: 15px; 
+            border-radius: 15px;
+            max-width: 80%;
+            animation: fadeIn 0.3s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .user { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            margin-left: auto;
+            border-bottom-right-radius: 5px;
+        }
+        .assistant { 
+            background: white;
+            border: 1px solid #e1e5e9;
+            margin-right: auto;
+            border-bottom-left-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .input-area { 
+            display: flex; 
+            gap: 10px; 
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e1e5e9;
+        }
+        input { 
+            flex: 1; 
+            padding: 15px; 
+            font-size: 16px; 
+            border: 2px solid #e1e5e9;
+            border-radius: 25px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        input:focus {
+            border-color: #667eea;
+        }
+        button { 
+            padding: 15px 25px; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; 
+            border: none; 
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: transform 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background: #f1f3f4;
+            border-bottom: 1px solid #e1e5e9;
+        }
+        .provider-selector {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .provider-btn {
+            padding: 8px 15px;
+            border: 2px solid #667eea;
+            background: white;
+            color: #667eea;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.3s;
+        }
+        .provider-btn.active {
+            background: #667eea;
+            color: white;
+        }
+        .status {
+            font-size: 12px;
+            color: #666;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #4CAF50;
+        }
+        .status-dot.offline {
+            background: #f44336;
+        }
+        .sources { 
+            font-size: 12px; 
+            color: #666; 
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #eee;
+        }
+        .typing-indicator {
+            display: inline-block;
+            padding: 10px 15px;
+            background: white;
+            border: 1px solid #e1e5e9;
+            border-radius: 15px;
+            border-bottom-left-radius: 5px;
+        }
+        .typing-dots {
+            display: inline-flex;
+            gap: 3px;
+        }
+        .typing-dots span {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #999;
+            animation: typing 1.4s infinite ease-in-out;
+        }
+        .typing-dots span:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dots span:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes typing {
+            0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+        .provider-badge {
+            font-size: 10px;
+            background: #667eea;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-left: 10px;
+        }
     </style>
 </head>
 <body>
     <div class="chat-container">
-        <h1>RAG Chat Interface</h1>
-        <div id="messages" class="messages"></div>
-        <div class="input-area">
-            <input type="text" id="questionInput" placeholder="Ask a question..." onkeypress="handleKeyPress(event)">
-            <button onclick="askQuestion()">Send</button>
+        <div class="header">
+            <h1>🤖 RAG Chat Assistant</h1>
+            <div class="subtitle">Powered by Groq • Fast AI Conversations</div>
         </div>
-        <div>
-            <small>Session ID: <span id="sessionId">default-session</span></small>
-            <button onclick="newSession()" style="margin-left: 10px;">New Session</button>
+        
+        <div class="controls">
+            <div class="provider-selector">
+                <span>AI Provider:</span>
+                <button class="provider-btn active" onclick="switchProvider('groq')">🚀 Groq (Fast)</button>
+                <button class="provider-btn" onclick="switchProvider('deepseek')">🤖 DeepSeek</button>
+                <button class="provider-btn" onclick="switchProvider('fallback')">📄 Simple</button>
+            </div>
+            <div class="status">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">Connected</span>
+            </div>
+        </div>
+
+        <div id="messages" class="messages"></div>
+        
+        <div class="input-area">
+            <input type="text" id="questionInput" placeholder="Ask me anything..." onkeypress="handleKeyPress(event)">
+            <button onclick="askQuestion()" id="sendButton">Send</button>
+        </div>
+        
+        <div style="padding: 10px 20px; background: #f1f3f4; text-align: center; font-size: 12px; color: #666;">
+            <div>Session ID: <span id="sessionId">default-session</span></div>
+            <div style="margin-top: 5px;">
+                <button onclick="newSession()" style="padding: 5px 10px; font-size: 11px; background: #666;">New Session</button>
+                <button onclick="testProviders()" style="padding: 5px 10px; font-size: 11px; background: #4CAF50; margin-left: 5px;">Test All Providers</button>
+            </div>
         </div>
     </div>
 
     <script>
         let sessionId = 'session-' + Date.now();
+        let currentProvider = 'groq';
         document.getElementById('sessionId').textContent = sessionId;
+
+        // Initialize with Groq
+        initializeProvider('groq');
 
         function handleKeyPress(event) {
             if (event.key === 'Enter') {
@@ -43,6 +239,50 @@
             sessionId = 'session-' + Date.now();
             document.getElementById('sessionId').textContent = sessionId;
             document.getElementById('messages').innerHTML = '';
+            addMessage('system', 'New conversation session started.', [], 'system');
+        }
+
+        function switchProvider(provider) {
+            currentProvider = provider;
+            
+            // Update UI
+            document.querySelectorAll('.provider-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // Update provider via API
+            fetch('/api/rag/switch-provider', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider: provider })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log(`Switched to ${data.provider}`);
+                addMessage('system', `Switched to ${data.provider.toUpperCase()} provider`, [], 'system');
+            })
+            .catch(error => {
+                console.error('Failed to switch provider:', error);
+            });
+            
+            updateStatus();
+        }
+
+        function initializeProvider(provider) {
+            fetch('/api/rag/switch-provider', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider: provider })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log(`Initialized with ${data.provider}`);
+                updateStatus();
+            })
+            .catch(error => {
+                console.error('Failed to initialize provider:', error);
+            });
         }
 
         async function askQuestion() {
@@ -54,48 +294,172 @@
             // Add user message to UI
             addMessage('user', question);
             input.value = '';
+            document.getElementById('sendButton').disabled = true;
+
+            // Show typing indicator
+            const typingId = showTypingIndicator();
 
             try {
+                const startTime = Date.now();
+                
                 const response = await fetch('/api/rag/query', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         question,
                         sessionId,
-                        searchType: 'hybrid'
+                        provider: currentProvider
                     })
                 });
 
                 const data = await response.json();
-                
-                // Add assistant response to UI
-                let assistantMessage = data.answer;
-                if (data.isFollowUp) {
-                    assistantMessage = '🔁 (Follow-up) ' + assistantMessage;
+                const responseTime = Date.now() - startTime;
+
+                // Remove typing indicator
+                removeTypingIndicator(typingId);
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Request failed');
                 }
-                
-                addMessage('assistant', assistantMessage, data.sources);
+
+                // Add assistant response to UI
+                addMessage('assistant', data.answer, data.sources, data.provider, responseTime);
                 
             } catch (error) {
-                addMessage('assistant', 'Error: ' + error.message);
+                removeTypingIndicator(typingId);
+                addMessage('assistant', `Error: ${error.message}`, [], 'error');
+                console.error('Chat error:', error);
+            } finally {
+                document.getElementById('sendButton').disabled = false;
+                input.focus();
             }
         }
 
-        function addMessage(role, content, sources = null) {
+        function addMessage(role, content, sources = null, provider = null, responseTime = null) {
             const messagesDiv = document.getElementById('messages');
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${role}`;
             
-            let messageHTML = `<strong>${role === 'user' ? 'You' : 'Assistant'}:</strong> ${content}`;
+            let messageHTML = '';
             
-            if (sources && sources.length > 0) {
-                messageHTML += `<div class="sources">Sources: ${sources.map(s => s.title).join(', ')}</div>`;
+            if (role === 'system') {
+                messageHTML = `<div style="text-align: center; color: #666; font-style: italic;">${content}</div>`;
+            } else {
+                messageHTML = `<div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                    <div style="flex: 1;">
+                        <strong>${role === 'user' ? 'You' : 'Assistant'}:</strong> ${content}
+                    </div>
+                    ${provider && role === 'assistant' ? 
+                        `<span class="provider-badge">${provider.toUpperCase()}</span>` : 
+                        ''
+                    }
+                </div>`;
+                
+                if (responseTime) {
+                    messageHTML += `<div style="font-size: 10px; color: #999; text-align: right; margin-top: 5px;">
+                        Response time: ${responseTime}ms
+                    </div>`;
+                }
+                
+                if (sources && sources.length > 0) {
+                    messageHTML += `<div class="sources">
+                        <strong>Sources:</strong> ${sources.map(s => s.title).join(', ')}
+                        (${sources.length} document${sources.length > 1 ? 's' : ''})
+                    </div>`;
+                }
             }
             
             messageDiv.innerHTML = messageHTML;
             messagesDiv.appendChild(messageDiv);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
         }
+
+        function showTypingIndicator() {
+            const messagesDiv = document.getElementById('messages');
+            const typingDiv = document.createElement('div');
+            typingDiv.className = 'message assistant';
+            typingDiv.id = 'typing-indicator';
+            typingDiv.innerHTML = `
+                <div class="typing-indicator">
+                    <strong>Assistant:</strong> 
+                    <div class="typing-dots" style="display: inline-block; margin-left: 10px;">
+                        <span></span><span></span><span></span>
+                    </div>
+                </div>
+            `;
+            messagesDiv.appendChild(typingDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            return 'typing-indicator';
+        }
+
+        function removeTypingIndicator(id) {
+            const typingElement = document.getElementById(id);
+            if (typingElement) {
+                typingElement.remove();
+            }
+        }
+
+        async function updateStatus() {
+            try {
+                const response = await fetch('/api/rag/health');
+                const data = await response.json();
+                
+                const statusDot = document.getElementById('statusDot');
+                const statusText = document.getElementById('statusText');
+                
+                if (data.status === 'OK') {
+                    statusDot.className = 'status-dot';
+                    statusText.textContent = `Connected (${currentProvider.toUpperCase()})`;
+                } else {
+                    statusDot.className = 'status-dot offline';
+                    statusText.textContent = 'Service Issues';
+                }
+            } catch (error) {
+                document.getElementById('statusDot').className = 'status-dot offline';
+                document.getElementById('statusText').textContent = 'Offline';
+            }
+        }
+
+        async function testProviders() {
+            const testQuestion = "What is artificial intelligence? Explain briefly.";
+            addMessage('system', 'Testing all AI providers...', [], 'system');
+            
+            try {
+                const response = await fetch('/api/rag/compare-providers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: testQuestion })
+                });
+                
+                const data = await response.json();
+                
+                // Display results
+                for (const [provider, answer] of Object.entries(data.results)) {
+                    addMessage('assistant', 
+                        `**${provider.toUpperCase()}**: ${answer}`, 
+                        [], 
+                        provider
+                    );
+                }
+                
+            } catch (error) {
+                addMessage('system', `Test failed: ${error.message}`, [], 'system');
+            }
+        }
+
+        // Initial status check
+        updateStatus();
+        // Check status every 30 seconds
+        setInterval(updateStatus, 30000);
+
+        // Welcome message
+        setTimeout(() => {
+            addMessage('assistant', 
+                "Hello! I'm your AI assistant powered by Groq. I can help you search for information and answer questions. What would you like to know?", 
+                [], 
+                'groq'
+            );
+        }, 1000);
     </script>
 </body>
 </html>

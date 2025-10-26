@@ -111,42 +111,49 @@ class ElasticsearchService {
 
   async hybridSearch(query, index = 'documents', size = 5) {
     try {
+      size=1
       const huggingfaceService = await this.getHuggingFaceService();
       const queryEmbedding = await huggingfaceService.generateEmbedding(query);
-      
+      console.log("the index is "+index)
       const response = await this.client.search({
         index: index,
         size: size,
         query: {
           bool: {
-            should: [
+            must: [
               {
-                script_score: {
-                  query: { 
-                    bool: {
-                      filter: {
-                        exists: { field: "embedding" }
-                      }
+                nested: {
+                  path: "body_v2",
+                  query: {
+                    exists: { field: "body_v2.body_text" }
+                  }
+                }
+              },
+              {
+                nested: {
+                  path: "body_v2",
+                  query: {
+                    multi_match: {
+                      query: query,
+                      fields: ["body_v2.body_text^2"],
+                      fuzziness: "AUTO"
                     }
-                  },
-                  script: {
-                    source: "dotProduct(params.query_vector, 'embedding') + 1.0",
-                    params: { query_vector: queryEmbedding }
                   }
                 }
               },
               {
                 multi_match: {
                   query: query,
-                  fields: ['title^3', 'content^2', 'keywords'],
-                  fuzziness: 'AUTO'
+                  fields: ["title^3"],
+                  fuzziness: "AUTO"
                 }
               }
             ]
           }
         },
-        _source: ['title', 'content', 'keywords', 'category']
+        _source: ["title", "body_v2.body_text"]
       });
+      
 
       return response.hits.hits.map(hit => ({
         id: hit._id,
@@ -161,7 +168,7 @@ class ElasticsearchService {
 
   formatDocumentsForContext(documents) {
     return documents.map((doc, index) => 
-      `[Document ${index + 1}] Title: ${doc.title}\nContent: ${doc.content}`
+      `[Document ${index + 1}] Title: ${doc.title}\nContent: ${JSON.stringify(doc.body_v2)}`
     ).join('\n\n');
   }
 
